@@ -13,6 +13,16 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const VideoCall = () => {
+  interface VideoRef {
+    srcObject: MediaStream;
+    current: HTMLVideoElement | null;
+  }
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+
+
+  const remoteVideoRefs = useRef<Map<string, VideoRef>>(new Map());
+  const remoteVideoRef = useRef<HTMLVideoElement>(null); // For single remote participant
+
   const [micEnabled, setMicEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
@@ -57,7 +67,9 @@ const VideoCall = () => {
     ],
     codecOptions: { videoGoogleStartBitrate: 1000 }
   });
-
+  useEffect(() => {
+    console.log('remoteStreams state changed:', remoteStreams);
+  }, [remoteStreams]);
 
   useEffect(() => {
     const socket = io('https://localhost:3000/mediasoup', {
@@ -230,33 +242,61 @@ const VideoCall = () => {
 
       // const newElem = document.createElement('div');
       // newElem.id = `td-${remoteProducerId}`;
+      // console.log(" newElem.id", newElem.id)
       // newElem.className = params.kind === 'video' ? 'remoteVideo' : '';
       // newElem.innerHTML = `<${params.kind} id="${remoteProducerId}" autoplay class="video" />`;
 
       // videoContainerRef.current.appendChild(newElem);
-      // console.log("newElem", videoContainerRef.current)
-
-      const newElem = document.createElement('div');
-      newElem.id = `td-${remoteProducerId}`;
-      newElem.className = params.kind === 'video' ? 'remoteVideo' : '';
-
-      // Create the video/audio element separately to keep a reference
-      const mediaElem = document.createElement(params.kind);
-      mediaElem.id = remoteProducerId;
-      mediaElem.autoplay = true;
-      mediaElem.className = 'video';
-
-      // Append the media element to the container div
-      newElem.appendChild(mediaElem);
-
-      // Append to the video container
-      videoContainerRef.current.appendChild(newElem);
-
-      // Directly assign the stream to the media element
-      mediaElem.srcObject = new MediaStream([consumer.track]);
-
 
       // (document.getElementById(remoteProducerId) as HTMLMediaElement).srcObject = new MediaStream([consumer.track]);
+      // console.log("new",newElem)
+      //   ------------------------------------       ----------------------------------
+
+      // const mediaElem = document.createElement('video');
+      // // mediaElem.id = remoteProducerId;
+      // mediaElem.autoplay = true;
+      // mediaElem.playsInline = true;
+      // mediaElem.className = 'w-full h-full object-cover';
+
+      // // Create and store ref object
+      // remoteVideoRef.current = mediaElem
+      // // remoteVideoRefs.current.set(remoteProducerId, remoteVideoRef);
+
+      // // Assign stream
+      // remoteVideoRef.current.srcObject = new MediaStream([consumer.track]);
+
+      // // Append to container
+      // if (videoContainerRef.current) {
+      //   videoContainerRef.current.appendChild(mediaElem);
+      // }
+
+
+      const stream = new MediaStream([consumer.track]);
+      setRemoteStreams(prev => ({
+        ...prev,
+        [remoteProducerId]: stream
+      }));
+    
+      // Cleanup when track ends
+      consumer.track.onended = () => {
+        setRemoteStreams(prev => {
+          const newStreams = {...prev};
+          delete newStreams[remoteProducerId];
+          return newStreams;
+        });
+      };
+
+
+
+      // Directly assign the stream to the media element
+      // mediaElem.srcObject = new MediaStream([consumer.track]);
+      // console.log("remoteVideoRef", remoteVideoRef);
+      // console.log("videoContainerRef", videoContainerRef);
+      // console.log("remoteVideoRefs", remoteVideoRefs)
+      // console.log("localvideoRef", localVideoRef)
+
+
+
 
       socketRef.current.emit('consumer-resume', { serverConsumerId: params.serverConsumerId });
     });
@@ -305,22 +345,28 @@ const VideoCall = () => {
         <div className="flex-1 flex flex-col">
           <div className="flex-1 p-2 sm:p-4 overflow-y-auto">
             <div className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-2'} gap-2 sm:gap-4 h-full`}>
-              <VideoParticipant
-                name="Jeff"
-                isHost={true}
-                resolution="1080p"
-                isMuted={!micEnabled}
-                ref={localVideoRef}
+            <VideoParticipant
+  name="Local"
+  isHost={true}
+  resolution="1080p"
+  isMuted={!micEnabled}
+  ref={localVideoRef}
+  stream={null} // Pass your local stream here
+  borderColor="border-purple-500"
+/>
 
-                borderColor="border-purple-500"
-              />
-              <VideoParticipant
-                name="Laura Figueroa"
-                resolution="720p"
-                isMuted={false}
-                ref={videoContainerRef}
-                borderColor="border-purple-500"
-              />
+{Object.entries(remoteStreams).map(([id, stream]) => (
+  <VideoParticipant
+    key={id}
+    name={`Remote ${id.slice(0, 4)}`}
+    resolution="720p"
+    isMuted={false}
+    stream={stream}
+    borderColor="border-blue-500"
+  />
+))}
+              {/* <div ref={remoteVideoRef} className="remote-video-container" /> */}
+
             </div>
           </div>
 

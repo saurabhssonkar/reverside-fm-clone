@@ -5,13 +5,13 @@ const RemoteVideoParticipant = ({
     stream,
     name,
     resolution,
-    onRemove
+    // onRemove
   }: {
     id: string;
     stream: MediaStream;
     name: string;
     resolution: string;
-    onRemove: () => void;
+    // onRemove: () => void;
   }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
   
@@ -24,9 +24,9 @@ const RemoteVideoParticipant = ({
         if (videoRef.current) {
           videoRef.current.srcObject = null;
         }
-        onRemove();
+        // onRemove();
       };
-    }, [stream, onRemove]);
+    }, [stream]);
   
     return (
       <div className="border-2 border-blue-500 rounded-lg overflow-hidden relative">
@@ -40,12 +40,12 @@ const RemoteVideoParticipant = ({
         <div className="absolute bottom-0 left-0 bg-black bg-opacity-50 text-white p-2">
           {name} • {resolution}
         </div>
-        <button 
+        {/* <button 
           onClick={onRemove}
           className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center"
         >
           ×
-        </button>
+        </button> */}
       </div>
     );
   };
