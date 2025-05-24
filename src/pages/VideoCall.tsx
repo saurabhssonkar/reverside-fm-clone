@@ -11,6 +11,8 @@ import {
   Users, MessageSquare, Music
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { startRecording } from "@/hooks/startRecording";
+
 
 const VideoCall = () => {
   interface VideoRef {
@@ -18,6 +20,8 @@ const VideoCall = () => {
     current: HTMLVideoElement | null;
   }
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const handledProducersRef = useRef(new Set());
+
 
 
   const remoteVideoRefs = useRef<Map<string, VideoRef>>(new Map());
@@ -107,7 +111,7 @@ const VideoCall = () => {
         ...videoParamsRef.current,
         track: stream.getVideoTracks()[0]
       } as any;
-      // startRecording(stream,mediaRecorderRef,recordedChunksRef,socketRef);
+     startRecording(stream,mediaRecorderRef,recordedChunksRef,socketRef);
 
       joinRoom(socket);
     }).catch(err => console.error(err));
@@ -173,6 +177,7 @@ const VideoCall = () => {
   };
 
   const connectSendTransport = async (transport) => {
+    console.log("saurabhcheck")
     const audioProd = await transport.produce(audioParamsRef.current);
     const videoProd = await transport.produce(videoParamsRef.current);
     setAudioProducer(audioProd);
@@ -207,17 +212,31 @@ const VideoCall = () => {
           errback(err);
         }
       });
+      if (handledProducersRef.current.has(remoteProducerId)) {
+        console.warn(`Duplicate consume ignored for producer: ${remoteProducerId}`);
+        return;
+      }
+      handledProducersRef.current.add(remoteProducerId);
 
       connectRecvTransport(consumerTransport, remoteProducerId, params.id);
     });
   };
 
   const connectRecvTransport = async (consumerTransport, remoteProducerId, serverConsumerTransportId) => {
+    // if (handledProducersRef.current.has(remoteProducerId)) {
+    //   console.warn(`Duplicate consume ignored for producer: ${remoteProducerId}`);
+    //   return;
+    // }
+
+    // // Add to the Set to mark this producer as handled
+    // handledProducersRef.current.add(remoteProducerId);
     socketRef.current.emit('consume', {
       rtpCapabilities: deviceRef.current.rtpCapabilities,
       remoteProducerId,
       serverConsumerTransportId,
     }, async ({ params }) => {
+      console.log("consume callback received for:", params?.producerId || remoteProducerId);
+
       if (params.error) return;
 
       const consumer = await consumerTransport.consume({
@@ -276,11 +295,11 @@ const VideoCall = () => {
         ...prev,
         [remoteProducerId]: stream
       }));
-    
+
       // Cleanup when track ends
       consumer.track.onended = () => {
         setRemoteStreams(prev => {
-          const newStreams = {...prev};
+          const newStreams = { ...prev };
           delete newStreams[remoteProducerId];
           return newStreams;
         });
@@ -345,26 +364,26 @@ const VideoCall = () => {
         <div className="flex-1 flex flex-col">
           <div className="flex-1 p-2 sm:p-4 overflow-y-auto">
             <div className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-2'} gap-2 sm:gap-4 h-full`}>
-            <VideoParticipant
-  name="Local"
-  isHost={true}
-  resolution="1080p"
-  isMuted={!micEnabled}
-  ref={localVideoRef}
-  stream={null} // Pass your local stream here
-  borderColor="border-purple-500"
-/>
+              <VideoParticipant
+                name="Local"
+                isHost={true}
+                resolution="1080p"
+                isMuted={!micEnabled}
+                ref={localVideoRef}
+                stream={null} // Pass your local stream here
+                borderColor="border-purple-500"
+              />
 
-{Object.entries(remoteStreams).map(([id, stream]) => (
-  <VideoParticipant
-    key={id}
-    name={`Remote ${id.slice(0, 4)}`}
-    resolution="720p"
-    isMuted={false}
-    stream={stream}
-    borderColor="border-blue-500"
-  />
-))}
+              {Object.entries(remoteStreams).map(([id, stream]) => (
+                <VideoParticipant
+                  key={id}
+                  name={`Remote ${id.slice(0, 4)}`}
+                  resolution="720p"
+                  isMuted={false}
+                  stream={stream}
+                  borderColor="border-blue-500"
+                />
+              ))}
               {/* <div ref={remoteVideoRef} className="remote-video-container" /> */}
 
             </div>
