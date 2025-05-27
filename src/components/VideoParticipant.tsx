@@ -33,10 +33,11 @@ const VideoParticipant = forwardRef<HTMLVideoElement, VideoParticipantProps>(
 
     // Combine forwarded ref with internal ref
     useImperativeHandle(ref, () => videoRef.current!);
+    console.log("saurabhStream",stream)
 
     // Handle stream changes
     useEffect(() => {
-      if (videoRef.current && stream) {
+      if (videoRef.current ) {
         const videoElement = videoRef.current;
         
         const handleLoadedData = () => setIsVideoLoading(false);

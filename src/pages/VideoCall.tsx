@@ -39,6 +39,7 @@ const VideoCall = () => {
   const videoContainerRef = useRef<HTMLVideoElement>(null);
 
   const roomName = window.location.pathname.split('/')[2];
+  console.log("saurabhcheck")
   console.log("roomName", roomName)
 
   const socketRef = useRef(null);
@@ -75,27 +76,59 @@ const VideoCall = () => {
     console.log('remoteStreams state changed:', remoteStreams);
   }, [remoteStreams]);
 
+  // useEffect(() => {
+  //   const socket = io('http://localhost:3000/mediasoup', {
+  //     transports: ['websocket'],
+  //     secure: true,
+  //     rejectUnauthorized: false,
+  //   });
+  //   socketRef.current = socket;
+
+
+  //   console.log("sock", socket)
+  //   setSocket(socket);
+
+  //   socket.on('connection-success', ({ socketId }) => {
+  //     console.log('Connected:', socketId);
+  //     getLocalStream(socket);
+  //   });
+
+  //   socket.on('new-producer', ({ producerId }) => signalNewConsumerTransport(producerId));
+  //   socket.on('producer-closed', ({ remoteProducerId }) => closeConsumer(remoteProducerId));
+  // }, []);
+
   useEffect(() => {
-    const socket = io('https://localhost:3000/mediasoup', {
-      transports: ['websocket'],
-      secure: true,
-      rejectUnauthorized: false,
-    });
-    socketRef.current = socket;
+  const socket = io('http://localhost:3000/mediasoup', {
+    transports: ['websocket'],
+    secure: true,
+    rejectUnauthorized: false,
+  });
+  
+  socketRef.current = socket;
+  setSocket(socket);
 
+  const handleConnectionSuccess = ({ socketId }) => {
+    console.log('Connected:', socketId);
+    getLocalStream(socket);
+  };
 
-    console.log("sock", socket)
-    setSocket(socket);
+  const handleNewProducer = ({ producerId }) => {
+    if (!handledProducersRef.current.has(producerId)) {
+      signalNewConsumerTransport(producerId);
+    }
+  };
 
-    socket.on('connection-success', ({ socketId }) => {
-      console.log('Connected:', socketId);
-      getLocalStream(socket);
-    });
+  socket.on('connection-success', handleConnectionSuccess);
+  socket.on('new-producer', handleNewProducer);
+  socket.on('producer-closed', closeConsumer);
 
-    socket.on('new-producer', ({ producerId }) => signalNewConsumerTransport(producerId));
-    socket.on('producer-closed', ({ remoteProducerId }) => closeConsumer(remoteProducerId));
-  }, []);
-
+  return () => {
+    socket.off('connection-success', handleConnectionSuccess);
+    socket.off('new-producer', handleNewProducer);
+    socket.off('producer-closed', closeConsumer);
+    socket.disconnect();
+  };
+}, []);
   const getLocalStream = (socket) => {
     navigator.mediaDevices.getUserMedia({
       audio: true,
@@ -111,7 +144,7 @@ const VideoCall = () => {
         ...videoParamsRef.current,
         track: stream.getVideoTracks()[0]
       } as any;
-     startRecording(stream,mediaRecorderRef,recordedChunksRef,socketRef);
+    //  startRecording(stream,mediaRecorderRef,recordedChunksRef,socketRef);
 
       joinRoom(socket);
     }).catch(err => console.error(err));
@@ -138,7 +171,7 @@ const VideoCall = () => {
   };
 
   const createSendTransport = (device, socket) => {
-    console.log("saurabh", device)
+    console.log("123", device)
     socket.emit('createWebRtcTransport', { consumer: false }, ({ params }) => {
       if (params.error) {
         console.error(params.error);
@@ -160,10 +193,12 @@ const VideoCall = () => {
       transport.on('produce', async (parameters, callback, errback) => {
         try {
           socket.emit('transport-produce', {
+            
             kind: parameters.kind,
             rtpParameters: parameters.rtpParameters,
             appData: parameters.appData,
           }, ({ id, producersExist }) => {
+            console.log("check ids",id,producersExist)
             callback({ id });
             if (producersExist) getProducers(socket);
           });
@@ -186,6 +221,7 @@ const VideoCall = () => {
 
   const getProducers = (socket) => {
     socket.emit('getProducers', (producerIds) => {
+      console.log("producerIds",producerIds)
       producerIds.forEach(signalNewConsumerTransport);
       // producerIds.forEach((producerId) => signalNewConsumerTransport(producerId, socket));
 
@@ -291,6 +327,7 @@ const VideoCall = () => {
 
 
       const stream = new MediaStream([consumer.track]);
+      console.log("stream",stream)
       setRemoteStreams(prev => ({
         ...prev,
         [remoteProducerId]: stream
