@@ -63,6 +63,10 @@ const VideoCall = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
 
+  // const [micEnabled, setMicEnabled] = useState(false);
+const [cameraEnabled, setCameraEnabled] = useState(true);
+
+
   const audioParamsRef = useRef({});
   const videoParamsRef = useRef({
     encodings: [
@@ -129,26 +133,46 @@ const VideoCall = () => {
     socket.disconnect();
   };
 }, []);
-  const getLocalStream = (socket) => {
-    navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: {
+  const getLocalStream = async (socket) => {
+  try {
+    // Dynamically create constraints
+    const constraints: MediaStreamConstraints = {
+      audio: micEnabled,
+      video: cameraEnabled ? {
         width: { min: 640, max: 1920 },
         height: { min: 400, max: 1080 }
-      }
-    }).then(stream => {
-      localVideoRef.current.srcObject = stream;
+      } : false
+    };
 
-      audioParamsRef.current = { track: stream.getAudioTracks()[0] };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    // Attach to video element only if video is enabled
+    if (cameraEnabled && localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+    }
+
+    const audioTrack = stream.getAudioTracks()[0];
+    const videoTrack = stream.getVideoTracks()[0];
+
+    if (micEnabled && audioTrack) {
+      audioParamsRef.current = { track: audioTrack };
+    }
+
+    if (cameraEnabled && videoTrack) {
       videoParamsRef.current = {
         ...videoParamsRef.current,
-        track: stream.getVideoTracks()[0]
+        track: videoTrack
       } as any;
-    //  startRecording(stream,mediaRecorderRef,recordedChunksRef,socketRef);
+    }
 
-      joinRoom(socket);
-    }).catch(err => console.error(err));
-  };
+    startRecording(stream, mediaRecorderRef, recordedChunksRef, socketRef);
+
+    joinRoom(socket);
+  } catch (err) {
+    console.error("getUserMedia error:", err);
+  }
+};
+
 
   const joinRoom = (socket) => {
     socket.emit('joinRoom', { roomName }, (data) => {
