@@ -53,7 +53,9 @@ const VideoCall = () => {
   const [rtpCapabilities, setRtpCapabilities] = useState(null);
   const [producerTransport, setProducerTransport] = useState(null);
   const [consumerTransports, setConsumerTransports] = useState([]);
-  const [consumingTransports, setConsumingTransports] = useState([]);
+  const consumerTransportsRef = useRef([]);
+  const consumingTransportsRef = useRef(new Set<string>());
+  const producerToPeerRef = useRef<Record<string, string>>({});
   const [audioProducer, setAudioProducer] = useState(null);
   const [videoProducer, setVideoProducer] = useState(null);
 
@@ -116,20 +118,22 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
     getLocalStream(socket);
   };
 
-  const handleNewProducer = ({ producerId }) => {
+  const handleNewProducer = ({ producerId, producerSocketId }) => {
     if (!handledProducersRef.current.has(producerId)) {
-      signalNewConsumerTransport(producerId);
+      signalNewConsumerTransport(producerId, producerSocketId);
     }
   };
 
+  const handleProducerClosed = ({ remoteProducerId }) => closeConsumer(remoteProducerId);
+
   socket.on('connection-success', handleConnectionSuccess);
   socket.on('new-producer', handleNewProducer);
-  socket.on('producer-closed', closeConsumer);
+  socket.on('producer-closed', handleProducerClosed);
 
   return () => {
     socket.off('connection-success', handleConnectionSuccess);
     socket.off('new-producer', handleNewProducer);
-    socket.off('producer-closed', closeConsumer);
+    socket.off('producer-closed', handleProducerClosed);
     socket.disconnect();
   };
 }, []);
@@ -175,7 +179,11 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
 
 
   const joinRoom = (socket) => {
-    socket.emit('joinRoom', { roomName }, (data) => {
+    socket.emit('joinRoom', { roomId: roomName }, (data) => {
+      if (data.error) {
+        console.error('joinRoom error:', data.error);
+        return;
+      }
       setRtpCapabilities(data.rtpCapabilities);
       createDevice(data.rtpCapabilities, socket);
     });
@@ -244,21 +252,20 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
   };
 
   const getProducers = (socket) => {
-    socket.emit('getProducers', (producerIds) => {
-      console.log("producerIds",producerIds)
-      producerIds.forEach(signalNewConsumerTransport);
-      // producerIds.forEach((producerId) => signalNewConsumerTransport(producerId, socket));
-
+    socket.emit('getProducers', (producers) => {
+      console.log("producers", producers);
+      producers.forEach(({ producerId, peerId }: { producerId: string; peerId: string }) =>
+        signalNewConsumerTransport(producerId, peerId)
+      );
     });
   };
 
-  const signalNewConsumerTransport = async (remoteProducerId) => {
-    console.log(remoteProducerId, "remoteProducerId", socket, "socket")
-    if (consumingTransports.includes(remoteProducerId)) return;
-    setConsumingTransports(prev => [...prev, remoteProducerId]);
+  const signalNewConsumerTransport = async (remoteProducerId: string, peerId: string) => {
+    if (consumingTransportsRef.current.has(remoteProducerId)) return;
+    consumingTransportsRef.current.add(remoteProducerId);
+    producerToPeerRef.current[remoteProducerId] = peerId;
 
     socketRef.current.emit('createWebRtcTransport', { consumer: true }, ({ params }) => {
-      // console.log("params",deviceRef.current)
       const consumerTransport = deviceRef.current.createRecvTransport(params);
 
       consumerTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
@@ -272,31 +279,23 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
           errback(err);
         }
       });
+
       if (handledProducersRef.current.has(remoteProducerId)) {
         console.warn(`Duplicate consume ignored for producer: ${remoteProducerId}`);
         return;
       }
       handledProducersRef.current.add(remoteProducerId);
 
-      connectRecvTransport(consumerTransport, remoteProducerId, params.id);
+      connectRecvTransport(consumerTransport, remoteProducerId, params.id, peerId);
     });
   };
 
-  const connectRecvTransport = async (consumerTransport, remoteProducerId, serverConsumerTransportId) => {
-    // if (handledProducersRef.current.has(remoteProducerId)) {
-    //   console.warn(`Duplicate consume ignored for producer: ${remoteProducerId}`);
-    //   return;
-    // }
-
-    // // Add to the Set to mark this producer as handled
-    // handledProducersRef.current.add(remoteProducerId);
+  const connectRecvTransport = async (consumerTransport, remoteProducerId: string, serverConsumerTransportId, peerId: string) => {
     socketRef.current.emit('consume', {
       rtpCapabilities: deviceRef.current.rtpCapabilities,
       remoteProducerId,
       serverConsumerTransportId,
     }, async ({ params }) => {
-      console.log("consume callback received for:", params?.producerId || remoteProducerId);
-
       if (params.error) return;
 
       const consumer = await consumerTransport.consume({
@@ -306,95 +305,55 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
         rtpParameters: params.rtpParameters,
       });
 
+      const entry = { consumerTransport, serverConsumerTransportId: params.id, producerId: remoteProducerId, peerId, consumer };
+      consumerTransportsRef.current = [...consumerTransportsRef.current, entry];
+      setConsumerTransports(prev => [...prev, entry]);
 
+      // Group audio+video into one stream per peer — one tile per remote participant
+      setRemoteStreams(prev => {
+        const existing = prev[peerId];
+        const tracks = existing ? [...existing.getTracks(), consumer.track] : [consumer.track];
+        return { ...prev, [peerId]: new MediaStream(tracks) };
+      });
 
-      setConsumerTransports(prev => [
-        ...prev,
-        {
-          consumerTransport,
-          serverConsumerTransportId: params.id,
-          producerId: remoteProducerId,
-          consumer,
-        }
-      ]);
-
-
-      // const newElem = document.createElement('div');
-      // newElem.id = `td-${remoteProducerId}`;
-      // console.log(" newElem.id", newElem.id)
-      // newElem.className = params.kind === 'video' ? 'remoteVideo' : '';
-      // newElem.innerHTML = `<${params.kind} id="${remoteProducerId}" autoplay class="video" />`;
-
-      // videoContainerRef.current.appendChild(newElem);
-
-      // (document.getElementById(remoteProducerId) as HTMLMediaElement).srcObject = new MediaStream([consumer.track]);
-      // console.log("new",newElem)
-      //   ------------------------------------       ----------------------------------
-
-      // const mediaElem = document.createElement('video');
-      // // mediaElem.id = remoteProducerId;
-      // mediaElem.autoplay = true;
-      // mediaElem.playsInline = true;
-      // mediaElem.className = 'w-full h-full object-cover';
-
-      // // Create and store ref object
-      // remoteVideoRef.current = mediaElem
-      // // remoteVideoRefs.current.set(remoteProducerId, remoteVideoRef);
-
-      // // Assign stream
-      // remoteVideoRef.current.srcObject = new MediaStream([consumer.track]);
-
-      // // Append to container
-      // if (videoContainerRef.current) {
-      //   videoContainerRef.current.appendChild(mediaElem);
-      // }
-
-
-      const stream = new MediaStream([consumer.track]);
-      console.log("stream",stream)
-      setRemoteStreams(prev => ({
-        ...prev,
-        [remoteProducerId]: stream
-      }));
-
-      // Cleanup when track ends
       consumer.track.onended = () => {
         setRemoteStreams(prev => {
-          const newStreams = { ...prev };
-          delete newStreams[remoteProducerId];
-          return newStreams;
+          const existing = prev[peerId];
+          if (!existing) return prev;
+          const remaining = existing.getTracks().filter(t => t.id !== consumer.track.id);
+          if (remaining.length === 0) {
+            const next = { ...prev };
+            delete next[peerId];
+            return next;
+          }
+          return { ...prev, [peerId]: new MediaStream(remaining) };
         });
       };
-
-
-
-      // Directly assign the stream to the media element
-      // mediaElem.srcObject = new MediaStream([consumer.track]);
-      // console.log("remoteVideoRef", remoteVideoRef);
-      // console.log("videoContainerRef", videoContainerRef);
-      // console.log("remoteVideoRefs", remoteVideoRefs)
-      // console.log("localvideoRef", localVideoRef)
-
-
-
 
       socketRef.current.emit('consumer-resume', { serverConsumerId: params.serverConsumerId });
     });
   };
 
-  const closeConsumer = (remoteProducerId) => {
-    console.log("producer are closed", consumerTransports)
-    const transportData = consumerTransports.find(data => data.producerId === remoteProducerId);
+  const closeConsumer = (remoteProducerId: string) => {
+    const transportData = consumerTransportsRef.current.find(d => d.producerId === remoteProducerId);
     if (transportData) {
       transportData.consumerTransport.close();
       transportData.consumer.close();
 
-      setConsumerTransports(prev =>
-        prev.filter(data => data.producerId !== remoteProducerId)
-      );
+      const { peerId } = transportData;
+      consumerTransportsRef.current = consumerTransportsRef.current.filter(d => d.producerId !== remoteProducerId);
+      setConsumerTransports(prev => prev.filter(d => d.producerId !== remoteProducerId));
 
-      const videoElem = document.getElementById(`td-${remoteProducerId}`);
-      if (videoElem) videoElem.remove();
+      // Remove tile only if this peer has no remaining consumers
+      setRemoteStreams(prev => {
+        const peerStillActive = consumerTransportsRef.current.some(d => d.peerId === peerId);
+        if (!peerStillActive) {
+          const next = { ...prev };
+          delete next[peerId];
+          return next;
+        }
+        return prev;
+      });
     }
   };
 

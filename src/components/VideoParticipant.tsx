@@ -37,18 +37,26 @@ const VideoParticipant = forwardRef<HTMLVideoElement, VideoParticipantProps>(
 
     // Handle stream changes
     useEffect(() => {
-      if (videoRef.current ) {
+      if (videoRef.current) {
         const videoElement = videoRef.current;
-        
-        const handleLoadedData = () => setIsVideoLoading(false);
+
+        const handleCanPlay = () => setIsVideoLoading(false);
         const handleError = () => setIsVideoLoading(true);
 
-        videoElement.srcObject = stream;
-        videoElement.addEventListener('loadeddata', handleLoadedData);
-        videoElement.addEventListener('error', handleError);
+        videoElement.srcObject = stream ?? null;
+        setIsVideoLoading(true);
+
+        if (stream) {
+          videoElement.addEventListener('canplay', handleCanPlay);
+          videoElement.addEventListener('error', handleError);
+          // Explicitly start playback — autoPlay alone can be blocked for unmuted streams
+          videoElement.play().catch(() => {});
+        } else {
+          setIsVideoLoading(false);
+        }
 
         return () => {
-          videoElement.removeEventListener('loadeddata', handleLoadedData);
+          videoElement.removeEventListener('canplay', handleCanPlay);
           videoElement.removeEventListener('error', handleError);
         };
       }
